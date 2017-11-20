@@ -190,6 +190,8 @@ public class JavaCard extends Task {
 		private String classes_path = null;
 		private String sources_path = null;
 		private String package_name = null;
+		private String proguardout_path = null;
+		private String proguard_path = null;
 		private byte[] package_aid = null;
 		private String package_version = null;
 		private Vector<JCApplet> raw_applets = new Vector<>();
@@ -236,6 +238,10 @@ public class JavaCard extends Task {
 
 		public void setSources(String arg) {
 			sources_path = arg;
+		}
+
+		public void setProguard(String arg) {
+			proguard_path = arg;
 		}
 
 		public void setVerify(boolean arg) {
@@ -388,6 +394,44 @@ public class JavaCard extends Task {
 			}
 		}
 
+		private void proguard() {
+			Java j = new Java(this);
+			j.setClassname("proguard.ProGuard");
+
+			Path cp = j.createClasspath();
+			cp.append(new Path(getProject(), proguard_path));
+
+			j.createArg().setLine("-injars '" + proguardout_path + "'");
+			j.createArg().setLine("-outjars '" + classes_path + "'");
+
+			StringBuilder libraryBuilder = new StringBuilder();
+
+			String api = null;
+			if (jckit.version == JC.V3) {
+				api = Paths.get(jckit.path, "lib", "api_classic.jar").toAbsolutePath().toString();
+			} else if (jckit.version == JC.V212) { // V2.1.X
+				api = Paths.get(jckit.path, "lib", "api21.jar").toAbsolutePath().toString();
+			} else { // V2.2.X
+				api = Paths.get(jckit.path, "lib", "api.jar").toAbsolutePath().toString();
+			}
+			libraryBuilder.append(api);
+			for (JCImport i : raw_imports) {
+				libraryBuilder.append(":" + i.jar);
+			}
+
+			j.createArg().setLine("-libraryjars '" + libraryBuilder + "'");
+			j.createArg().setLine("-dontwarn java.lang.Class");
+			j.createArg().setLine("-allowaccessmodification");
+
+			for (JCApplet a : raw_applets) {
+				j.createArg().setLine("-keep public class " + a.klass + " {public static void install(byte[], short, byte);}");
+			}
+
+			j.setFailonerror(true);
+			j.setFork(true);
+			j.execute();
+		}
+
 		private void compile() {
 			Javac j = new Javac();
 			j.setProject(getProject());
@@ -407,6 +451,16 @@ public class JavaCard extends Task {
 				temporary.add(p);
 				tmp = p.toFile();
 				classes_path = tmp.getAbsolutePath();
+			}
+
+			// Generate temporary folder
+			if(proguard_path != null) {
+				java.nio.file.Path p = mktemp();
+				temporary.add(p);
+				tmp = p.toFile();
+				proguardout_path = tmp.getAbsolutePath();
+			} else {
+				proguardout_path = tmp.getAbsolutePath();
 			}
 
 			j.setDestdir(tmp);
@@ -460,6 +514,11 @@ public class JavaCard extends Task {
 				if (sources_path != null) {
 					compile();
 				}
+
+				if(proguard_path != null) {
+					proguard();
+				}
+
 				// construct the Java task that executes converter
 				Java j = new Java(this);
 				// classpath to jckit bits
